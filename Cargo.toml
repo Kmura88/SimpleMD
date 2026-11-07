@@ -1,0 +1,44 @@
+[package]
+name = "mdview"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+description = "A fast, native Markdown notebook viewer with file tree, outline, search and live reload"
+
+[dependencies]
+clap = { version = "4.6.7", features = ["derive"] }
+egui = { version = "0.37", features = ["monochrome_emoji_fonts"] }
+eframe = { version = "0.37", features = ["glow", "persistence"] }
+egui_extras = { version = "0.37", features = ["file", "image", "http", "svg", "svg_text"] }
+fontdb = "0.24.0"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp"] }
+pulldown-cmark = { version = "0.13.6", default-features = false, features = ["html"] }
+regex = "1.13.1"
+serde = { version = "1.0.229", features = ["derive"] }
+syntect = { version = "5.3.0", default-features = false, features = ["default-fancy", "html"] }
+encoding_rs = "0.8.44"
+notify = "8.2.1"
+open = "5.4.5"
+sys-locale = "0.3.2"
+two-face = { version = "0.5.2", default-features = false, features = ["syntect-fancy"] }
+rfd = "0.18.0"
+
+# 機能: ドラッグ＆ドロップ（Linux では X11 で起動するために winit の X11 拡張を使う）
+[target.'cfg(target_os = "linux")'.dependencies]
+winit = { version = "0.30", default-features = false, features = ["x11"] }
+
+[dev-dependencies]
+egui_kittest = { version = "0.37", features = ["eframe"] }
+
+# 開発ビルド（cargo run）でも依存ライブラリは最適化して、動作が重くならないようにする。
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = true
+codegen-units = 1
