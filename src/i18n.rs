@@ -145,6 +145,15 @@ impl Strings {
         }
     }
 
+    /// ドロップされたファイルが Markdown ではないとき。
+    pub fn unsupported_files(&self, names: &str) -> String {
+        if self.ja {
+            format!("Markdown ファイルではないため開けません: {names}")
+        } else {
+            format!("Not a Markdown file, cannot open: {names}")
+        }
+    }
+
     pub fn note_not_found(&self, name: &str) -> String {
         if self.ja {
             format!("ノート「{name}」が見つかりません")

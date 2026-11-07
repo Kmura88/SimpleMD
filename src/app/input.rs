@@ -38,14 +38,16 @@ enum Action {
 impl App {
     /// 毎フレーム、入力を見て操作を実行する。
     pub fn handle_input(&mut self, ctx: &egui::Context) {
-        // ---- ドラッグ＆ドロップ: フォルダなら開き直し、ファイルなら開く ----
-        let dropped = ctx.input(|i| i.raw.dropped_files.first().map(|f| f.path().to_path_buf()));
-        if let Some(p) = dropped {
-            if p.is_dir() {
-                self.set_root(p, true);
-            } else {
-                self.open(ctx, &p, None, true);
-            }
+        // ---- ドラッグ＆ドロップ ----
+        let dropped: Vec<std::path::PathBuf> = ctx.input(|i| {
+            i.raw
+                .dropped_files
+                .iter()
+                .map(|f| f.path().to_path_buf())
+                .collect()
+        });
+        if !dropped.is_empty() {
+            self.open_dropped(ctx, dropped);
         }
 
         // ---- スライド表示中はスライド用のキーだけ ----
@@ -159,6 +161,35 @@ impl App {
         });
         for a in actions {
             self.run(ctx, a);
+        }
+    }
+
+    /// 機能: ドラッグ＆ドロップ — ドロップされたものを開く。
+    /// - フォルダ: そのフォルダを開く（複数なら最初の 1 つ）
+    /// - Markdown ファイル: 1 つ目は現在のタブ、2 つ目以降は新しいタブで開く
+    /// - それ以外（PDF・画像など）: 開かずに「対応していないファイル」と通知する
+    fn open_dropped(&mut self, ctx: &egui::Context, paths: Vec<std::path::PathBuf>) {
+        if let Some(dir) = paths.iter().find(|p| p.is_dir()) {
+            self.set_root(dir.clone(), true);
+            return;
+        }
+        let (md, other): (Vec<_>, Vec<_>) = paths
+            .into_iter()
+            .filter(|p| p.is_file())
+            .partition(|p| crate::workspace::is_markdown(p));
+        for (i, p) in md.iter().enumerate() {
+            if i == 0 {
+                self.open(ctx, p, None, true);
+            } else {
+                self.open_in_new_tab(ctx, p, None);
+            }
+        }
+        if !other.is_empty() {
+            let names: Vec<String> = other
+                .iter()
+                .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+                .collect();
+            self.toast(ctx, self.s.unsupported_files(&names.join(", ")));
         }
     }
 
