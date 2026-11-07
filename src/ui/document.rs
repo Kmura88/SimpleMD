@@ -278,6 +278,12 @@ impl App {
                         .strong()
                         .color(pal.heading),
                 );
+                // 機能: バージョン表示（Cargo.toml の version）
+                ui.label(
+                    RichText::new(format!("v{}", env!("CARGO_PKG_VERSION")))
+                        .size(12.0)
+                        .color(pal.muted),
+                );
                 ui.label(RichText::new(self.root.display().to_string()).color(pal.muted));
                 ui.add_space(20.0);
                 if let Some(tree) = &self.tree {

@@ -247,6 +247,11 @@ impl App {
                         ui.end_row();
                     });
                 ui.separator();
+                ui.label(
+                    RichText::new(format!("mdview v{}", env!("CARGO_PKG_VERSION")))
+                        .size(11.0)
+                        .color(self.palette.muted),
+                );
                 let r = &self.fonts.report;
                 let none = || "—".to_string();
                 ui.label(

@@ -1,0 +1,178 @@
+# 機能: 自動リリース
+#
+# Cargo.toml の version を上げて main に push すると、そのバージョンのタグ（vX.Y.Z）が
+# まだ無ければ、次を自動で行う。
+#   1. テスト
+#   2. Windows / Linux / macOS（Apple Silicon・Intel）向けにビルド
+#   3. 実行ファイル・README・CHANGELOG・サンプルをまとめて圧縮
+#   4. タグ vX.Y.Z と GitHub Release を作り、CHANGELOG の該当バージョンの節を本文にする
+#
+# 同じバージョンのまま push しても何もしない（タグが既にあるため）。
+# Actions 画面の「Run workflow」から手動で実行することもできる。
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths: [Cargo.toml]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ---- 1. リリースが必要か判定 ----
+  check:
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release: ${{ steps.version.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 既存のタグも取得する
+
+      - id: version
+        name: Read version from Cargo.toml
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
+          if [ -z "$version" ]; then
+            echo "::error::Cargo.toml に version が見つかりません"; exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            echo "v$version は既にリリース済みなので何もしません"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "v$version をリリースします"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ---- 2. テスト ----
+  test:
+    needs: check
+    if: needs.check.outputs.release == 'true'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev \
+            libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
+      - run: cargo test --locked
+
+  # ---- 3. 各 OS 向けにビルドして圧縮 ----
+  build:
+    needs: [check, test]
+    if: needs.check.outputs.release == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            exe: mdview.exe
+          - os: ubuntu-22.04 # 古めの glibc でビルドして、多くの Linux で動くようにする
+            target: x86_64-unknown-linux-gnu
+            exe: mdview
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            exe: mdview
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            exe: mdview
+    runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install system libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev \
+            libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package
+        shell: bash
+        run: |
+          name="mdview-v${VERSION}-${{ matrix.target }}"
+          mkdir -p "dist/$name"
+          cp "target/${{ matrix.target }}/release/${{ matrix.exe }}" "dist/$name/"
+          cp README.md CHANGELOG.md "dist/$name/"
+          cp -r samples "dist/$name/"
+          [ -f LICENSE ] && cp LICENSE "dist/$name/"
+          cd dist
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            7z a -tzip "$name.zip" "$name" > /dev/null
+          else
+            tar czf "$name.tar.gz" "$name"
+          fi
+          rm -rf "$name"
+          ls -la
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.target }}
+          path: dist/*
+
+  # ---- 4. タグと GitHub Release を作る ----
+  release:
+    needs: [check, build]
+    if: needs.check.outputs.release == 'true'
+    runs-on: ubuntu-22.04
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: dist-*
+          merge-multiple: true
+
+      - name: Release notes from CHANGELOG.md
+        run: |
+          # 「## [X.Y.Z]」の見出しから次の「## [」の手前までを取り出す
+          awk -v v="$VERSION" '
+            /^## \[/ { if (found) exit; if (index($0, "[" v "]")) { found = 1; next } }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "CHANGELOG.md に v$VERSION の記載がありません。" > notes.md
+          fi
+          echo "---- notes.md ----"; cat notes.md
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          name: mdview v${{ env.VERSION }}
+          target_commitish: ${{ github.sha }}
+          body_path: notes.md
+          generate_release_notes: true # コミット・PR の一覧も末尾に付ける
+          files: dist/*

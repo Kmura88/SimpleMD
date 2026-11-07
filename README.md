@@ -125,6 +125,26 @@ cargo run --release -- samples
 
 macOS では `Ctrl` の代わりに `Cmd` を使います。
 
+## リリースとバージョン管理
+
+バージョンは `Cargo.toml` の `version`（`メジャー.マイナー.パッチ`）で管理します。変更履歴は `CHANGELOG.md` に書きます。
+
+```bash
+scripts/bump-version.sh patch   # 0.1.0 → 0.1.1（不具合修正）
+scripts/bump-version.sh minor   # 0.1.0 → 0.2.0（機能追加）
+scripts/bump-version.sh major   # 0.1.0 → 1.0.0
+# CHANGELOG.md の新しい節に変更内容を書いてから
+git add -A && git commit -m "Release v0.1.1" && git push
+```
+
+main に push されると GitHub Actions（`.github/workflows/release.yml`）が、そのバージョンのタグがまだ無ければ自動で次を行います。
+
+1. テスト
+2. Windows / Linux / macOS（Apple Silicon・Intel）向けにビルド
+3. タグ `vX.Y.Z` と GitHub Release を作成し、各 OS 向けの圧縮ファイルと `SHA256SUMS.txt` を添付（本文は CHANGELOG の該当節）
+
+バージョンを上げずに push した場合は、リリースは作られません（`.github/workflows/ci.yml` によるテストだけが走ります）。
+
 ## 開発
 
 動作が重いと感じたら、`MDVIEW_PROFILE=1 cargo run --release -- <フォルダ>` で起動すると、起動の内訳・1 フレームの処理時間・時間のかかったブロックが表示されます。
