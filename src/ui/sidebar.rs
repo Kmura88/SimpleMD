@@ -1,5 +1,7 @@
 //! # 機能: サイドバー
 //! - ファイル: フォルダツリー（開いているファイルまで自動展開）、ファイル名の絞り込み、フォルダを開く
+//!   - ⊟ ですべてのフォルダを閉じる
+//!   - 🗀 でフォルダ移動モード（1 フォルダずつ表示し、クリックで中へ入る）に切り替え
 //! - 検索: フォルダ内の全文検索（バックグラウンド）
 //! - タグ: フロントマター / 本文の `#タグ` ごとのノート一覧
 //!
@@ -14,9 +16,11 @@ use egui::{
 };
 
 use super::{
-    clicked_with_tab, display_name, fuzzy_label, icon_button, rank_files, rel_display, thousands,
+    clicked_with_tab, display_name, fuzzy_label, icon_button, icon_toggle, rank_files, rel_display,
+    thousands,
 };
 use crate::app::{App, LeftTab, absolute};
+use crate::settings::TreeStyle;
 use crate::textsearch::Needle;
 use crate::theme::Palette;
 use crate::workspace::{Node, Tree};
@@ -54,6 +58,24 @@ impl App {
                 ui.menu_button("📂", |ui| self.open_folder_menu(ui))
                     .response
                     .on_hover_text(s.tip_open_folder);
+                // 機能: 表示方法の切り替え（ツリー ⇔ フォルダ移動）
+                let drill = self.settings.tree_style == TreeStyle::Drill;
+                if icon_toggle(ui, "🗀", drill, s.tip_drill_mode).clicked() {
+                    self.settings.tree_style = if drill {
+                        TreeStyle::Tree
+                    } else {
+                        TreeStyle::Drill
+                    };
+                    // どちらのモードでも、開いているファイルの場所から始める。
+                    self.reveal = self.doc().map(|d| d.path.clone());
+                }
+                // 機能: ツリーをすべて閉じる（ツリー表示のときだけ）
+                if !drill
+                    && icon_button(ui, "⊟", true, s.tip_collapse_all).clicked()
+                    && let Some(tree) = &self.tree
+                {
+                    collapse_all(&ctx, &tree.nodes);
+                }
             });
         });
         ui.add(
@@ -64,41 +86,126 @@ impl App {
         ui.add_space(4.0);
 
         let mut clicked: Option<(PathBuf, bool)> = None;
-        ScrollArea::vertical()
-            .id_salt("tree")
-            .auto_shrink(false)
-            .show(ui, |ui| {
-                ui.with_layout(Layout::top_down_justified(Align::LEFT), |ui| {
-                    ui.style_mut().wrap_mode = Some(TextWrapMode::Truncate);
-                    ui.spacing_mut().item_spacing.y = 1.0;
-                    // ツリーを借りたまま self を変更できないので、一時的に取り出す。
-                    let Some(tree) = self.tree.take() else {
-                        ui.horizontal(|ui| {
-                            ui.spinner();
-                            ui.label(s.scanning);
-                        });
-                        return;
-                    };
-                    if tree.files.is_empty() {
-                        ui.label(RichText::new(s.no_md_files).color(self.palette.muted));
-                    } else if self.tree_filter.trim().is_empty() {
-                        let current = self.doc().map(|d| d.path.clone());
-                        let reveal = self.reveal.take();
-                        tree_nodes(
+        let mut scroll = ScrollArea::vertical().id_salt("tree").auto_shrink(false);
+        if std::mem::take(&mut self.tree_scroll_to_top) {
+            scroll = scroll.vertical_scroll_offset(0.0);
+        }
+        scroll.show(ui, |ui| {
+            ui.with_layout(Layout::top_down_justified(Align::LEFT), |ui| {
+                ui.style_mut().wrap_mode = Some(TextWrapMode::Truncate);
+                ui.spacing_mut().item_spacing.y = 1.0;
+                // ツリーを借りたまま self を変更できないので、一時的に取り出す。
+                let Some(tree) = self.tree.take() else {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(s.scanning);
+                    });
+                    return;
+                };
+                if tree.files.is_empty() {
+                    ui.label(RichText::new(s.no_md_files).color(self.palette.muted));
+                } else if self.tree_filter.trim().is_empty() {
+                    let current = self.doc().map(|d| d.path.clone());
+                    let reveal = self.reveal.take();
+                    match self.settings.tree_style {
+                        TreeStyle::Tree => tree_nodes(
                             ui,
                             &tree.nodes,
                             current.as_deref(),
                             reveal.as_deref(),
                             &mut clicked,
-                        );
-                    } else {
-                        self.filtered_files(ui, &tree, &mut clicked);
+                        ),
+                        TreeStyle::Drill => self.drill_nodes(
+                            ui,
+                            &tree,
+                            current.as_deref(),
+                            reveal.as_deref(),
+                            &mut clicked,
+                        ),
                     }
-                    self.tree = Some(tree);
-                });
+                } else {
+                    self.filtered_files(ui, &tree, &mut clicked);
+                }
+                self.tree = Some(tree);
             });
+        });
         if let Some((p, new_tab)) = clicked {
             self.open_with(&ctx, &p, None, new_tab);
+        }
+    }
+
+    /// 機能: フォルダ移動モード — `browse_dir` の中身だけを出す。
+    /// 先頭に「⬆ 現在のフォルダ」の行、続いてフォルダ（クリックで中へ）、ファイル。
+    fn drill_nodes(
+        &mut self,
+        ui: &mut Ui,
+        tree: &Tree,
+        current: Option<&Path>,
+        reveal: Option<&Path>,
+        clicked: &mut Option<(PathBuf, bool)>,
+    ) {
+        // ファイルを開いたら（リンク・検索・タブ切り替えなど）、そのファイルのフォルダへ移動する。
+        // ツリーに無いフォルダ（隠しフォルダ・node_modules など）のファイルなら、今のフォルダに留まる。
+        if let Some(dir) = reveal.and_then(Path::parent) {
+            if dir == tree.root {
+                self.browse_dir = None;
+            } else if find_children(&tree.nodes, dir).is_some() {
+                self.browse_dir = Some(dir.to_path_buf());
+            }
+        }
+        // 表示中のフォルダが消えていたらルートに戻る。
+        let nodes = match &self.browse_dir {
+            None => &tree.nodes,
+            Some(dir) => match find_children(&tree.nodes, dir) {
+                Some(children) => children,
+                None => {
+                    self.browse_dir = None;
+                    &tree.nodes
+                }
+            },
+        };
+
+        // 現在地の行: ⬆ ボタンとフォルダの相対パス。
+        let s = self.s;
+        let mut go: Option<Option<PathBuf>> = None;
+        ui.horizontal(|ui| {
+            let at_root = self.browse_dir.is_none();
+            if icon_button(ui, "⬆", !at_root, s.tip_parent_folder).clicked()
+                && let Some(dir) = &self.browse_dir
+            {
+                go = Some(
+                    dir.parent()
+                        .filter(|p| *p != tree.root)
+                        .map(Path::to_path_buf),
+                );
+            }
+            let here = match &self.browse_dir {
+                None => "/".to_string(),
+                Some(dir) => format!(
+                    "/{}",
+                    rel_display(dir.strip_prefix(&tree.root).unwrap_or(dir))
+                ),
+            };
+            ui.label(RichText::new(here).color(self.palette.muted));
+        });
+        ui.separator();
+
+        for node in nodes {
+            match &node.children {
+                Some(_) => {
+                    let resp = ui
+                        .add(Button::selectable(false, format!("🗀 {}", node.name)))
+                        .on_hover_text(&node.name);
+                    if resp.clicked() {
+                        go = Some(Some(node.path.clone()));
+                    }
+                }
+                None => file_button(ui, node, current, reveal, clicked),
+            }
+        }
+        if let Some(dir) = go {
+            self.browse_dir = dir;
+            self.tree_scroll_to_top = true;
         }
     }
 
@@ -365,6 +472,28 @@ pub(super) fn note_button(ui: &mut Ui, tree: &Tree, i: usize, pal: &Palette) -> 
     clicked_with_tab(ui, &resp)
 }
 
+/// フォルダの開閉状態の ID。描画の入れ子に左右されないよう、フォルダのパスだけから作る
+/// （「すべて閉じる」で、まだ描いていない奥のフォルダの状態も書き換えられるようにするため）。
+fn folder_id(path: &Path) -> egui::Id {
+    egui::Id::unique(("tree_folder", path))
+}
+
+/// 機能: ツリーをすべて閉じる — 開閉状態が記録されているフォルダを、奥の階層まで全部閉じる。
+/// 状態は egui が保存するので、再起動しても閉じたまま。新しい状態は作らない（記録が増え続けない）。
+fn collapse_all(ctx: &egui::Context, nodes: &[Node]) {
+    for node in nodes {
+        if let Some(children) = &node.children {
+            if let Some(mut state) =
+                egui::collapsing_header::CollapsingState::load(ctx, folder_id(&node.path))
+            {
+                state.set_open(false);
+                state.store(ctx);
+            }
+            collapse_all(ctx, children);
+        }
+    }
+}
+
 /// フォルダツリーを再帰的に描く。`reveal` に含まれるフォルダは開き、そのファイルまでスクロールする。
 fn tree_nodes(
     ui: &mut Ui,
@@ -376,31 +505,69 @@ fn tree_nodes(
     for node in nodes {
         match &node.children {
             Some(children) => {
-                let mut header = egui::CollapsingHeader::new(&node.name)
-                    .id_salt(&node.path)
-                    .default_open(false);
+                let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
+                    ui.ctx(),
+                    folder_id(&node.path),
+                    false,
+                );
                 if reveal.is_some_and(|r| r.starts_with(&node.path)) {
-                    header = header.open(Some(true));
+                    state.set_open(true);
                 }
-                header.show(ui, |ui| tree_nodes(ui, children, current, reveal, clicked));
+                // 見出し（▶ とフォルダ名）。名前をクリックしても開閉する。
+                let mut toggle = false;
+                let mut header = state.show_header(ui, |ui| {
+                    toggle = ui
+                        .add(Button::selectable(false, &node.name).frame_when_inactive(false))
+                        .on_hover_text(&node.name)
+                        .clicked();
+                });
+                if toggle {
+                    header.toggle();
+                }
+                header.body(|ui| tree_nodes(ui, children, current, reveal, clicked));
             }
-            None => {
-                let selected = current == Some(node.path.as_path());
-                let name = Path::new(&node.name)
-                    .file_stem()
-                    .map_or(node.name.clone(), |s| s.to_string_lossy().into_owned());
-                let resp = ui
-                    .add(Button::selectable(selected, format!("📄 {name}")))
-                    .on_hover_text(&node.name);
-                if selected && reveal.is_some() {
-                    resp.scroll_to_me(Some(Align::Center));
-                }
-                if let Some(new_tab) = clicked_with_tab(ui, &resp) {
-                    *clicked = Some((node.path.clone(), new_tab));
-                }
+            None => file_button(ui, node, current, reveal, clicked),
+        }
+    }
+}
+
+/// ファイル 1 件のボタン（ツリー表示とフォルダ移動モードで共用）。
+/// 開いているファイルは選択表示にし、`reveal` があればそこまでスクロールする。
+fn file_button(
+    ui: &mut Ui,
+    node: &Node,
+    current: Option<&Path>,
+    reveal: Option<&Path>,
+    clicked: &mut Option<(PathBuf, bool)>,
+) {
+    let selected = current == Some(node.path.as_path());
+    let name = Path::new(&node.name)
+        .file_stem()
+        .map_or(node.name.clone(), |s| s.to_string_lossy().into_owned());
+    let resp = ui
+        .add(Button::selectable(selected, format!("📄 {name}")))
+        .on_hover_text(&node.name);
+    if selected && reveal.is_some() {
+        resp.scroll_to_me(Some(Align::Center));
+    }
+    if let Some(new_tab) = clicked_with_tab(ui, &resp) {
+        *clicked = Some((node.path.clone(), new_tab));
+    }
+}
+
+/// ツリーの中から `dir` フォルダを探し、その中身を返す。
+fn find_children<'a>(nodes: &'a [Node], dir: &Path) -> Option<&'a [Node]> {
+    for node in nodes {
+        if let Some(children) = &node.children {
+            if node.path == dir {
+                return Some(children);
+            }
+            if dir.starts_with(&node.path) {
+                return find_children(children, dir);
             }
         }
     }
+    None
 }
 
 /// 全文検索の結果 1 行（行番号と、一致部分を強調した本文）。

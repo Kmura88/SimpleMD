@@ -59,7 +59,8 @@ Markdown の表示は 2 段階です。
 | スクロール位置の予約（見出し・検索一致へ） | `app/navigation.rs` | `ScrollTarget`, `take_scroll` |
 | タブ | `app/tabs.rs`, `ui/document.rs` | `Tab`, `new_tab`, `close_tab`, `tab_bar` |
 | ファイルごとのスクロール位置の記憶 | `settings.rs`, `app/tabs.rs` | `remember_position`, `position_of` |
-| ファイルツリー・絞り込み | `ui/sidebar.rs`, `workspace.rs` | `files_tab`, `tree_nodes`, `scan` |
+| ファイルツリー・絞り込み・すべて閉じる | `ui/sidebar.rs`, `workspace.rs` | `files_tab`, `tree_nodes`, `collapse_all`, `folder_id`, `scan` |
+| フォルダ移動モード（1 フォルダずつ表示） | `ui/sidebar.rs`, `settings.rs` | `drill_nodes`, `find_children`, `TreeStyle`, `App::browse_dir` |
 | 目次・バックリンク | `ui/outline.rs`, `index.rs` | `outline`, `backlinks`, `NoteIndex` |
 | タグ | `ui/sidebar.rs`, `index.rs` | `tags_tab`, `front_tags`, `body_tags` |
 | リンク先プレビュー | `ui/preview.rs` | `preview_popup`, `section_blocks` |

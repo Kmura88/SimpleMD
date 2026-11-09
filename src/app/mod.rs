@@ -127,6 +127,10 @@ pub struct App {
     pub filter_cache: Option<(String, Ranked)>,
     /// 次のフレームでツリーをこのファイルまで展開する。
     pub reveal: Option<PathBuf>,
+    /// 機能: フォルダ移動モード — いま表示しているフォルダ（`None` ならルート）。
+    pub browse_dir: Option<PathBuf>,
+    /// 次のフレームでファイル一覧のスクロールを先頭に戻す（フォルダ移動モードで別のフォルダへ移ったとき）。
+    pub tree_scroll_to_top: bool,
     /// 機能: タグ — 選択中のタグ。
     pub selected_tag: Option<String>,
 
@@ -211,6 +215,8 @@ impl App {
             tree_filter: String::new(),
             filter_cache: None,
             reveal: None,
+            browse_dir: None,
+            tree_scroll_to_top: false,
             selected_tag: None,
             tabs: vec![Tab::default()],
             active: 0,
@@ -329,6 +335,7 @@ impl App {
         self.root = root.clone();
         self.tree = None;
         self.tree_filter.clear();
+        self.browse_dir = None;
         self.selected_tag = None;
         self.search.results = None;
         self.search.last_started.clear();

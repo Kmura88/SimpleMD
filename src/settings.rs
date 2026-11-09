@@ -15,6 +15,16 @@ pub const MAX_FONT: f32 = 32.0;
 /// スクロール位置を覚えておくファイル数の上限。
 const MAX_POSITIONS: usize = 300;
 
+/// 機能: サイドバーのファイル一覧の表示方法。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum TreeStyle {
+    /// フォルダを折りたたみ式のツリーで表示する。
+    #[default]
+    Tree,
+    /// 1 つのフォルダの中身だけを表示し、フォルダをクリックして中に入る（rust_md_viewer と同じ方式）。
+    Drill,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -28,6 +38,8 @@ pub struct Settings {
     pub content_width: f32,
     pub show_sidebar: bool,
     pub show_outline: bool,
+    /// 機能: サイドバーのファイル一覧の表示方法（ツリー / フォルダ移動）。
+    pub tree_style: TreeStyle,
     pub auto_reload: bool,
     /// フォントの指定（空欄なら自動選択）。
     pub body_font: String,
@@ -60,6 +72,7 @@ impl Default for Settings {
             content_width: 860.0,
             show_sidebar: true,
             show_outline: true,
+            tree_style: TreeStyle::Tree,
             auto_reload: true,
             body_font: String::new(),
             mono_font: String::new(),
