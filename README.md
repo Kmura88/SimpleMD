@@ -142,7 +142,7 @@ main に push されると GitHub Actions（`.github/workflows/release.yml`）�
 
 1. テスト
 2. Windows / Linux / macOS（Apple Silicon・Intel）向けにビルド
-3. タグ `vX.Y.Z` と GitHub Release を作成し、各 OS 向けの圧縮ファイルと `SHA256SUMS.txt` を添付（本文は CHANGELOG の該当節）
+3. タグ `vX.Y.Z` と GitHub Release を作成し、各 OS 向けの実行ファイル単体（Windows は `.exe`）・圧縮ファイル・`SHA256SUMS.txt` を添付（本文は CHANGELOG の該当節）
 
 バージョンを上げずに push した場合は、リリースは作られません（`.github/workflows/ci.yml` によるテストだけが走ります）。
 

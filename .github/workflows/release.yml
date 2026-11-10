@@ -4,7 +4,7 @@
 # まだ無ければ、次を自動で行う。
 #   1. テスト
 #   2. Windows / Linux / macOS（Apple Silicon・Intel）向けにビルド
-#   3. 実行ファイル・README・CHANGELOG・サンプルをまとめて圧縮
+#   3. 実行ファイル・README・CHANGELOG・サンプルをまとめて圧縮（実行ファイル単体も添付）
 #   4. タグ vX.Y.Z と GitHub Release を作り、CHANGELOG の該当バージョンの節を本文にする
 #
 # 同じバージョンのまま push しても何もしない（タグが既にあるため）。
@@ -127,6 +127,14 @@ jobs:
             tar czf "$name.tar.gz" "$name"
           fi
           rm -rf "$name"
+          # 実行ファイル単体もそのままダウンロードできるように置く
+          case "${{ matrix.target }}" in
+            *windows*) single="mdview-v${VERSION}-windows-x86_64.exe" ;;
+            x86_64-unknown-linux-gnu) single="mdview-v${VERSION}-linux-x86_64" ;;
+            aarch64-apple-darwin) single="mdview-v${VERSION}-macos-arm64" ;;
+            x86_64-apple-darwin) single="mdview-v${VERSION}-macos-x86_64" ;;
+          esac
+          cp "../target/${{ matrix.target }}/release/${{ matrix.exe }}" "$single"
           ls -la
 
       - uses: actions/upload-artifact@v4
